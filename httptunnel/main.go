@@ -147,6 +147,9 @@ func handleConn(connid uint64, aConn net.Conn) {
 
 	stopCh := make(chan uint64, 2)
 	reportCh := make(chan int, 100)
+	defer close(reportCh)
+	defer close(stopCh)
+
 	go pipe(connid, stopCh, reportCh, aConn, bConn)
 	go pipe(connid, stopCh, reportCh, bConn, aConn)
 	idelTime := time.Duration(*g_idle_timeout) * time.Second
@@ -165,8 +168,13 @@ func handleConn(connid uint64, aConn net.Conn) {
 			//关闭远程连接和本地连接
 			bConn.Close()
 			aConn.Close()
-			<-stopCh
-			close(stopCh)
+			for i := 0; i < 1; {
+				select {
+				case <-stopCh:
+					i++
+				case <-reportCh:
+				}
+			}
 			logger.Info(connid, "broken release done")
 			return
 		case n := <-reportCh:
@@ -180,15 +188,20 @@ func handleConn(connid uint64, aConn net.Conn) {
 			logger.Info(connid, "idel timeout release begin")
 			bConn.Close()
 			aConn.Close()
-			<-stopCh
-			<-stopCh
+			for i := 0; i < 2; {
+				select {
+				case <-stopCh:
+					i++
+				case <-reportCh:
+				}
+			}
 			logger.Info(connid, "idel timeout release done")
 			return
 		}
 	}
 }
 
-func pipe(id uint64, stopCh chan uint64, reportCh chan int, reader net.Conn, writer net.Conn) {
+func pipe(id uint64, stopCh chan uint64, reportCh chan int, reader io.Reader, writer io.Writer) {
 	defer func() {
 		stopCh <- id
 	}()
