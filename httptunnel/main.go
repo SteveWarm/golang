@@ -17,14 +17,16 @@ import (
 )
 
 var (
-	g_listen    *string = flag.String("listen", "", "")
-	g_http      *string = flag.String("http", "", "")
-	g_https     *string = flag.String("https", "", "")
-	g_buff_size *int    = flag.Int("buff", 1000, "")
-	g_idle_time *int    = flag.Int("idle_time", 80, "")
+	g_listen       *string = flag.String("listen", "", "")
+	g_http         *string = flag.String("http", "", "")
+	g_https        *string = flag.String("https", "", "")
+	g_buff_size    *int    = flag.Int("buff", 1000, "")
+	g_idle_timeout *int    = flag.Int("idle_timeout", 80, "")
+	g_dial_timeout *int    = flag.Int("dial_timeout", 3, "")
+	g_keep_alive   *int    = flag.Int("keep_alive", 280, "tcp keep alive second")
 
 	g_log_path    = flag.String("log_path", "/tmp/", "")
-	g_log_name    = flag.String("log_name", "tunnel.log", "")
+	g_log_name    = flag.String("log_name", "httptunnel.log", "")
 	g_log_level   = flag.Int("log_level", 2, "")
 	g_log_console = flag.Bool("log_console", false, "")
 )
@@ -94,13 +96,13 @@ var g_conn_id = uint64(1)
 
 func handleConn(connid uint64, aConn net.Conn) {
 	defer aConn.Close()
-
 	aStr := fmt.Sprintf(
 		"a %s - %s",
 		aConn.RemoteAddr().String(),
 		aConn.LocalAddr().String())
-
 	logger.Info(connid, aStr, "come")
+
+	setTcpProperties(aConn)
 
 	buf := make([]byte, 4)
 	aConn.SetReadDeadline(time.Now().Add(4 * time.Second))
@@ -119,7 +121,7 @@ func handleConn(connid uint64, aConn net.Conn) {
 		addr = *g_https
 	}
 
-	bConn, err := net.Dial("tcp", addr)
+	bConn, err := net.DialTimeout("tcp", addr, time.Duration(*g_dial_timeout)*time.Second)
 	if err != nil {
 		logger.Error(connid, "dial ", addr, "err:", err)
 		return
@@ -132,6 +134,7 @@ func handleConn(connid uint64, aConn net.Conn) {
 		bConn.RemoteAddr().String())
 
 	logger.Info(connid, aStr, "<->", bStr)
+	setTcpProperties(bConn)
 
 	n, err := bConn.Write(buf)
 	if err != nil {
@@ -146,7 +149,7 @@ func handleConn(connid uint64, aConn net.Conn) {
 	reportCh := make(chan int, 100)
 	go pipe(connid, stopCh, reportCh, aConn, bConn)
 	go pipe(connid, stopCh, reportCh, bConn, aConn)
-	idelTime := time.Duration(*g_idle_time) * time.Second
+	idelTime := time.Duration(*g_idle_timeout) * time.Second
 	timer := time.NewTimer(idelTime)
 
 	pkgcount := uint64(0)
@@ -226,5 +229,13 @@ func pipe(id uint64, stopCh chan uint64, reportCh chan int, reader net.Conn, wri
 			}
 			return
 		}
+	}
+}
+
+func setTcpProperties(conn net.Conn) {
+	c, ok := conn.(*net.TCPConn)
+	if ok {
+		c.SetKeepAlive(true)
+		c.SetKeepAlivePeriod(time.Duration(*g_keep_alive) * time.Second)
 	}
 }
