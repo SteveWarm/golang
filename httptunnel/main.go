@@ -96,21 +96,22 @@ func handleConn(connid uint64, aConn net.Conn) {
 	defer aConn.Close()
 
 	aStr := fmt.Sprintf(
-		"%s - %s",
+		"a %s - %s",
 		aConn.RemoteAddr().String(),
 		aConn.LocalAddr().String())
 
-	logger.Info(connid, aStr)
+	logger.Info(connid, aStr, "come")
 
 	buf := make([]byte, 4)
-	aConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	aConn.SetReadDeadline(time.Now().Add(4 * time.Second))
 	if n, err := io.ReadFull(aConn, buf); err != nil || n != 4 {
-		logger.Error(connid, "n:", n, "err:", err)
+		logger.Warn(connid, "n:", n, "err:", err)
 		return
 	}
 
 	var addr string
-	if bytes.Compare(bytes.ToLower(buf), POST) == 0 {
+	var method []byte = bytes.ToLower(buf)
+	if bytes.Compare(method, POST) == 0 || bytes.Compare(method, GET) == 0 || bytes.Compare(method, DELETE) == 0 || bytes.Compare(method, PUT) == 0 {
 		// http
 		addr = *g_http
 	} else {
@@ -126,7 +127,7 @@ func handleConn(connid uint64, aConn net.Conn) {
 	defer bConn.Close()
 
 	bStr := fmt.Sprintf(
-		"%s - %s",
+		"b %s - %s",
 		bConn.LocalAddr().String(),
 		bConn.RemoteAddr().String())
 
@@ -157,23 +158,28 @@ func handleConn(connid uint64, aConn net.Conn) {
 	for {
 		select {
 		case <-stopCh:
-			logger.Info(connid, "release begin")
+			logger.Info(connid, "broken release begin")
 			//关闭远程连接和本地连接
 			bConn.Close()
 			aConn.Close()
 			<-stopCh
 			close(stopCh)
-			logger.Info(connid, "release done")
+			logger.Info(connid, "broken release done")
 			return
 		case n := <-reportCh:
 			timer.Reset(idelTime)
 			pkgsize += uint64(n)
 			pkgcount += 1
+			if pkgcount%10 == 0 {
+				logger.Info(connid, "addr:", addr, "pkgcount:", pkgcount, "pkgsize:", pkgsize)
+			}
 		case <-timer.C:
+			logger.Info(connid, "idel timeout release begin")
 			bConn.Close()
 			aConn.Close()
 			<-stopCh
 			<-stopCh
+			logger.Info(connid, "idel timeout release done")
 			return
 		}
 	}
@@ -198,7 +204,7 @@ func pipe(id uint64, stopCh chan uint64, reportCh chan int, reader net.Conn, wri
 				if err2 == io.EOF {
 					logger.Info(id, "b closed")
 				} else {
-					logger.Warn(id, "write faild!", err2.Error())
+					logger.Info(id, "write faild!", err2.Error())
 				}
 				return
 			}
@@ -216,7 +222,7 @@ func pipe(id uint64, stopCh chan uint64, reportCh chan int, reader net.Conn, wri
 			if err1 == io.EOF {
 				logger.Info(id, "a closed")
 			} else {
-				logger.Warn(id, "read faild!", err1.Error())
+				logger.Info(id, "read faild!", err1.Error())
 			}
 			return
 		}
